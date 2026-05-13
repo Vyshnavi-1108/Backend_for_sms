@@ -1,9 +1,11 @@
 import os
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel, Field
 from typing import Literal
 from google import genai
 from google.genai import types
+import json
 
 from dependencies import get_current_user
 
@@ -45,6 +47,31 @@ def get_or_create_session(user_id: int):
         )
     return chat_sessions[user_id]
 
+# ── Generator that yields SSE-formatted chunks ───────────────────────
+def stream_chat_response(user_id: int, message: str):
+    """
+    Generator: yields SSE events as Gemini produces tokens.
+    Uses the user's existing ChatSession so history is maintained.
+    """
+    session = get_or_create_session(user_id)
+    try:
+        for chunk in session.send_message_stream(message):
+            if chunk.text:
+                data = json.dumps({"chunk": chunk.text})
+                yield f"data: {data}\n\n"
+        yield "data: [DONE]\n\n"
+
+    except ValueError:
+        error = json.dumps({"error": "Content blocked — try rephrasing."})
+        yield f"data: {error}\n\n"
+        yield "data: [DONE]\n\n"
+
+    except Exception as exc:
+        print(f"[stream] Gemini error: {exc}")
+        error = json.dumps({"error": "AI service temporarily unavailable."})
+        yield f"data: {error}\n\n"
+        yield "data: [DONE]\n\n"
+
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=1000)
 
@@ -64,6 +91,9 @@ class ExplainRequest(BaseModel):
 
 class ExplainResponse(BaseModel):
     explanation: str
+
+class StreamRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=1000)
 
 LEVEL_PERSONAS = {
     "beginner":     "a school student who has never programmed before",
@@ -140,3 +170,19 @@ def explain_topic(
     except Exception as exc:
         print(f"[explain] Gemini error: {exc}")
         raise HTTPException(status_code=503, detail="AI service unavailable.")
+    
+
+# ── POST /ai/stream ──────────────────────────────────────────────────
+@router.post("/stream")
+def stream_ai_response(
+    request: StreamRequest,
+    current_user=Depends(get_current_user),
+):
+    return StreamingResponse(
+        stream_chat_response(current_user.id, request.message),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",    # prevents nginx from buffering chunks
+        }
+    )
