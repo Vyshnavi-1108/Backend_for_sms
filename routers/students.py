@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from typing import List
 
 from database import get_db
@@ -33,10 +34,21 @@ def create_student(
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user)
 ):
-    student = Student(**data.dict())
+    student = Student(**data.model_dump())
+
     db.add(student)
-    db.commit()
-    db.refresh(student)
+
+    try:
+        db.commit()
+        db.refresh(student)
+
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail="Email already exists"
+        )
+
     return student
 
 @router.put("/{student_id}", response_model=StudentResponse)

@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: download the repository code onto the VM
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Step 2: install Python 3.11 on the VM
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Step 3: install all Python packages
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # Step 4: run the tests
+      - name: Run tests
+        run: python -m pytest tests/ -v
+        env:
+          SECRET_KEY: test-secret-key-for-ci-only-not-production
+          GEMINI_API_KEY: dummy-key-not-used-in-tests

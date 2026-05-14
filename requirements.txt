@@ -7,3 +7,5 @@ pydantic[email]
 bcrypt==4.0.1
 python-dotenv
 google-genai
+httpx
+pytest
